@@ -35,16 +35,6 @@ class GorillaClinicStack(TerraformStack):
         secondary_provider = AwsProvider(self, "aws_secondary", region=secondary_vars["region"], alias="secondary")
         random_provider = RandomProvider(self, "random")
 
-        # Create shared global resources
-        route53_zone, roles = create_global_resources(self, "global", primary_vars)
-
-
-        # Create region-specific resources
-        primary_region = create_region_stack(self, "primary-region",
-            primary_vars, True, roles, route53_zone, primary_provider)
-        secondary_region = create_region_stack(self, "secondary-region",
-            secondary_vars, False, roles, route53_zone, secondary_provider)
-
 
 app = App()
 GorillaClinicStack(app, "gorilla-clinic")
