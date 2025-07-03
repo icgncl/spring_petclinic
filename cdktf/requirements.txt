@@ -1,0 +1,7 @@
+# CDKTF 0.19.x is required for AWS provider 18.x
+cdktf>=0.19.0,<0.20.0
+# AWS provider 18.x is compatible with CDKTF 0.19.x
+cdktf-cdktf-provider-aws>=18.2.0,<19.0.0
+# Random provider 10.x is compatible with CDKTF 0.19.x
+cdktf-cdktf-provider-random>=10.0.1,<11.0.0
+python-hcl2

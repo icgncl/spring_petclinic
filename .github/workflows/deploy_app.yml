@@ -1,0 +1,212 @@
+name: Build Docker Image and Trigger CodeDeploy
+
+on:
+  push:
+    branches: [production]
+  workflow_dispatch:
+
+env:
+  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image_uri: ${{ steps.build.outputs.image_uri }}
+      primary_region: ${{ steps.load-env.outputs.primary_region }}
+      secondary_region: ${{ steps.load-env.outputs.secondary_region }}
+      ecr_repo_name: ${{ steps.load-env.outputs.ecr_repo_name }}
+
+    steps:
+      - name: Checkout your repo
+        uses: actions/checkout@v3
+
+      - name: Clone Spring PetClinic
+        run: git clone https://github.com/spring-projects/spring-petclinic.git
+
+      - name: Load env variables
+        id: load-env
+        run: |
+          set -a
+          source .github/workflows/variables/${BRANCH_NAME}.env
+          echo "primary_region=$PRIMARY_REGION" >> $GITHUB_OUTPUT
+          echo "secondary_region=$SECONDARY_REGION" >> $GITHUB_OUTPUT
+          echo "ecr_repo_name=$ECR_REPO_NAME" >> $GITHUB_OUTPUT
+          set +a
+        shell: bash
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ steps.load-env.outputs.primary_region }}
+
+      - name: Login to both ECR registries
+        run: |
+          aws ecr get-login-password --region ${{ steps.load-env.outputs.primary_region }} | \
+            docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ steps.load-env.outputs.primary_region }}.amazonaws.com
+          aws ecr get-login-password --region ${{ steps.load-env.outputs.secondary_region }} | \
+            docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${{ steps.load-env.outputs.secondary_region }}.amazonaws.com
+
+      - name: Build and push Docker image to both regions (Dockerfile-based)
+        id: build
+        working-directory: spring-petclinic
+        run: |
+          IMAGE_TAG=${GITHUB_RUN_ID}
+          REPO_NAME=${{ steps.load-env.outputs.ecr_repo_name }}
+          ACCOUNT_ID=${{ secrets.AWS_ACCOUNT_ID }}
+
+          PRIMARY_REPO=${ACCOUNT_ID}.dkr.ecr.${{ steps.load-env.outputs.primary_region }}.amazonaws.com/${REPO_NAME}
+          SECONDARY_REPO=${ACCOUNT_ID}.dkr.ecr.${{ steps.load-env.outputs.secondary_region }}.amazonaws.com/${REPO_NAME}
+
+          echo "Building Docker image"
+          docker build -f ../.github/workflows/deploy/Dockerfile -t $PRIMARY_REPO:$IMAGE_TAG .
+
+          docker push $PRIMARY_REPO:$IMAGE_TAG
+
+          docker tag $PRIMARY_REPO:$IMAGE_TAG $PRIMARY_REPO:latest
+          docker push $PRIMARY_REPO:latest
+
+          docker tag $PRIMARY_REPO:$IMAGE_TAG $SECONDARY_REPO:$IMAGE_TAG
+          docker tag $PRIMARY_REPO:$IMAGE_TAG $SECONDARY_REPO:latest
+          docker push $SECONDARY_REPO:$IMAGE_TAG
+          docker push $SECONDARY_REPO:latest
+
+          echo "image_uri=$PRIMARY_REPO:$IMAGE_TAG" >> $GITHUB_OUTPUT
+
+
+  setup:
+    runs-on: ubuntu-latest
+    needs: build
+    outputs:
+      regions: ${{ steps.extract.outputs.regions }}
+      ecs_service: ${{ steps.extract.outputs.ecs_service }}
+      ecs_task_family: ${{ steps.extract.outputs.ecs_task_family }}
+      codedeploy_app: ${{ steps.extract.outputs.codedeploy_app }}
+      codedeploy_group: ${{ steps.extract.outputs.codedeploy_group }}
+      container_name: ${{ steps.extract.outputs.container_name }}
+      container_port: ${{ steps.extract.outputs.container_port }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Extract deployment variables
+        id: extract
+        run: |
+          set -a
+          source .github/workflows/variables/${BRANCH_NAME}.env
+          set +a
+          echo "regions=[\"$PRIMARY_REGION\",\"$SECONDARY_REGION\"]" >> $GITHUB_OUTPUT
+          echo "ecs_service=$ECS_SERVICE_NAME" >> $GITHUB_OUTPUT
+          echo "ecs_task_family=$ECS_TASK_FAMILY" >> $GITHUB_OUTPUT
+          echo "codedeploy_app=$CODEDEPLOY_APP" >> $GITHUB_OUTPUT
+          echo "codedeploy_group=$CODEDEPLOY_GROUP" >> $GITHUB_OUTPUT
+          echo "container_name=$CONTAINER_NAME" >> $GITHUB_OUTPUT
+          echo "container_port=$CONTAINER_PORT" >> $GITHUB_OUTPUT
+
+  deploy:
+    needs: [build, setup]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        region: ${{ fromJson(needs.setup.outputs.regions) }}
+
+    env:
+      AWS_REGION: ${{ matrix.region }}
+      ECR_REPO_NAME: ${{ needs.build.outputs.ecr_repo_name }}
+      ECS_SERVICE_NAME: ${{ needs.setup.outputs.ecs_service }}
+      ECS_TASK_FAMILY: ${{ needs.setup.outputs.ecs_task_family }}
+      CODEDEPLOY_APP: ${{ needs.setup.outputs.codedeploy_app }}
+      CODEDEPLOY_GROUP: ${{ needs.setup.outputs.codedeploy_group }}
+      CONTAINER_NAME: ${{ needs.setup.outputs.container_name }}
+      CONTAINER_PORT: ${{ needs.setup.outputs.container_port }}
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ matrix.region }}
+
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region $AWS_REGION | \
+          docker login --username AWS --password-stdin ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${AWS_REGION}.amazonaws.com
+
+      - name: Pull image
+        run: |
+          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${AWS_REGION}.amazonaws.com/${{ env.ECR_REPO_NAME }}:${GITHUB_RUN_ID}
+          docker pull $IMAGE_URI
+
+      - name: Fetch existing ECS task definition
+        run: aws ecs describe-task-definition --task-definition $ECS_TASK_FAMILY --region $AWS_REGION > old-task.json
+
+      - name: Register new ECS task definition
+        run: |
+          IMAGE_URI=${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.${AWS_REGION}.amazonaws.com/${ECR_REPO_NAME}:${GITHUB_RUN_ID}
+
+          NEW_DEF=$(jq --arg IMAGE "$IMAGE_URI" --arg NAME "$CONTAINER_NAME" '
+            .taskDefinition |
+            .containerDefinitions |= map(
+              if .name == $NAME then
+                .image = $IMAGE
+              else
+                .
+              end
+            ) |
+            {
+              family,
+              containerDefinitions,
+              executionRoleArn,
+              networkMode,
+              requiresCompatibilities,
+              cpu,
+              memory
+            } + (if .taskRoleArn != null then {taskRoleArn} else {} end)
+          ' old-task.json)
+
+
+          echo "$NEW_DEF" > new-task-def.json
+          aws ecs register-task-definition --cli-input-json file://new-task-def.json --region $AWS_REGION > result.json
+          echo "TASK_DEF_ARN=$(jq -r '.taskDefinition.taskDefinitionArn' result.json)" >> $GITHUB_ENV
+
+      - name: Generate appspec.yaml
+        run: |
+          cat <<EOF > appspec.yaml
+          version: 1
+          Resources:
+            - TargetService:
+                Type: AWS::ECS::Service
+                Properties:
+                  TaskDefinition: ${TASK_DEF_ARN}
+                  LoadBalancerInfo:
+                    ContainerName: ${CONTAINER_NAME}
+                    ContainerPort: ${CONTAINER_PORT}
+          EOF
+
+      - name: Trigger CodeDeploy deployment
+        run: |
+          # Convert YAML to escaped JSON string
+          CONTENT=$(cat appspec.yaml | jq -Rs .)
+
+          # Use inline JSON for the revision block
+          aws deploy create-deployment \
+            --application-name "$CODEDEPLOY_APP" \
+            --deployment-group-name "$CODEDEPLOY_GROUP" \
+            --deployment-config-name CodeDeployDefault.ECSAllAtOnce \
+            --region "$AWS_REGION" \
+            --cli-input-json "{
+              \"applicationName\": \"${CODEDEPLOY_APP}\",
+              \"deploymentGroupName\": \"${CODEDEPLOY_GROUP}\",
+              \"deploymentConfigName\": \"CodeDeployDefault.ECSAllAtOnce\",
+              \"revision\": {
+                \"revisionType\": \"AppSpecContent\",
+                \"appSpecContent\": {
+                  \"content\": $CONTENT
+                }
+              }
+            }"

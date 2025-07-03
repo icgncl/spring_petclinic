@@ -1,0 +1,20 @@
+{
+  "language": "python",
+  "app": "python main.py",
+  "projectId": "69ff0e72-0cb3-42c4-afe7-90fac36ab994",
+  "sendCrashReports": "false",
+  "terraformProviders": [],
+  "terraformModules": [],
+  "codeMakerOutput": "imports",
+  "context": {
+  },
+  "terraformBackend": {
+    "backend": "s3",
+    "bucket": "gorilla-clinic-terraform-state", 
+    "key": "state/${branch_name}/terraform.tfstate", 
+    "region": "eu-west-1",
+    "encrypt": true, 
+    "dynamodb_table": "terraform-locks",
+    "acl": "bucket-owner-full-control"
+  }
+}
