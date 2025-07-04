@@ -16,6 +16,6 @@ use_rds                         = false  # Cannot use with aurora, use_aurora_se
 use_aurora                      = false # Cannot use with rds, aurora_serverless
 db_writer_record                = "db-writer"
 db_reader_record                = "db-reader"
-db_secret_name                  = "db_secret"
+db_secret_name                  = "db_secret_gorilla"
 cpu_target_value                = 70
 memory_target_value             = 70
