@@ -3,13 +3,13 @@ from cdktf_cdktf_provider_aws.secretsmanager_secret import SecretsmanagerSecret
 from cdktf_cdktf_provider_aws.secretsmanager_secret_version import SecretsmanagerSecretVersion
 import time
 
-def create_or_get_secret(scope: Construct, id: str, tfvars: dict, provider) -> SecretsmanagerSecret:
+def create_or_get_secret(scope: Construct, id: str, tfvars: dict, provider) -> str:
     """
     Attempts to use an existing secret with a fixed name.
     If not found, creates it with prevent_destroy and ignore_changes protection.
     """
     secret = SecretsmanagerSecret(scope, id,
-        name=f"{tfvars["db_secret_name"]}-{time.time()}",
+        name=f"{tfvars["db_secret_name"]}",
         provider=provider,
         description="Master password for gorilla-clinic DB"
     )
