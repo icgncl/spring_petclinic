@@ -11,4 +11,4 @@ def create_password(scope: Construct, id: str, provider: TerraformProvider):
         override_special="_%@",
         provider=provider
     )
-    return password
+    return password.result
