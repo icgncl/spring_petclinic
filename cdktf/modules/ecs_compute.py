@@ -17,7 +17,7 @@ from cdktf_cdktf_provider_aws.codedeploy_deployment_group import (
 
 
 def create_compute(scope: Construct, id: str, tfvars: dict, net: dict, sg: dict, alb_info: dict,
-                   shared_roles:dict, provider: TerraformProvider, db_info: dict = None):
+                   shared_roles:dict, provider: TerraformProvider, is_primary:bool, db_info: dict = None):
     
     cluster = ecs_cluster.EcsCluster(scope, f"{id}-cluster", provider=provider, name=f"{tfvars['name']}-cluster",
         setting = [
@@ -49,7 +49,7 @@ def create_compute(scope: Construct, id: str, tfvars: dict, net: dict, sg: dict,
     environment = []
     secrets = []
 
-    if db_info:
+    if db_info and is_primary:
         environment = [
             {"name": "SPRING_DATASOURCE_URL", 
                 "value": f"jdbc:postgresql://{db_info['db_endpoint']}:{db_info['db_port']}/{db_info['db_name']}"},

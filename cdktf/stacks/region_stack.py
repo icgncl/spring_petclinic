@@ -29,7 +29,7 @@ def create_region_stack(scope, id, tfvars, is_primary, shared_roles, shared_zone
     # Create Compute Resources (ECS)
     compute_info = create_compute(
         scope, f"{id}-ecs", tfvars, net, sg, alb_info,
-        shared_roles, provider, db_info
+        shared_roles, provider, is_primary, db_info
     )
 
     # Create VPC Endpoints
