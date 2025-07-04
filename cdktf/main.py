@@ -24,6 +24,10 @@ secondary_vars = load_tfvars(f"{tfvars_path_prefix}/secondary_region.tfvars")
 class GorillaClinicStack(TerraformStack):
     def __init__(self, scope: Construct, id: str):
         super().__init__(scope, id)
+        
+        random_provider = RandomProvider(self, "random")
+        
+        global_vars["db_password"] = create_password(self, "password", provider=random_provider)
 
         global_vars["primary_region"] = primary_vars["region"]
         global_vars["secondary_region"] = secondary_vars["region"]
@@ -34,7 +38,6 @@ class GorillaClinicStack(TerraformStack):
         create_backend_resources(self, "backend", primary_vars, branch_name)
         primary_provider = AwsProvider(self, "aws_primary", region=primary_vars["region"], alias="primary")
         secondary_provider = AwsProvider(self, "aws_secondary", region=secondary_vars["region"], alias="secondary")
-        random_provider = RandomProvider(self, "random")
 
         # Create shared global resources
         route53_zone, roles = create_global_resources(self, "global", primary_vars)
